@@ -41,13 +41,14 @@ if RO_AUTH:
 
 DB_CONNSTR = os.getenv("DB_CONNSTR")
 if not DB_CONNSTR:
+	logger.info("No DB_CONNSTR set, using in memory db")
 	DB_CONNSTR = ":memory:"
 
 db = sqlite3.connect(DB_CONNSTR, check_same_thread=False)
 # prepare tables
 cur = db.cursor()
-cur.execute('CREATE TABLE logs (source TEXT, log TEXT, ts DATETIME DEFAULT CURRENT_TIMESTAMP)')
-cur.execute('CREATE TABLE ingest (source TEXT PRIMARY KEY, token TEXT, time_added DATETIME DEFAULT CURRENT_TIMESTAMP)')
+cur.execute('CREATE TABLE IF NOT EXISTS logs (source TEXT, log TEXT, ts DATETIME DEFAULT CURRENT_TIMESTAMP)')
+cur.execute('CREATE TABLE IF NOT EXISTS ingest (source TEXT PRIMARY KEY, token TEXT, time_added DATETIME DEFAULT CURRENT_TIMESTAMP)')
 
 
 class Condition():
@@ -111,7 +112,7 @@ def parse_conditions_from_q(q):
 		source = s.split('source=')[1].split()[0]
 		if 'keyword=' in s:
 			keyword = s.split('keyword="')[1].split('"')[0]
-		if "delimiter=" in s:
+		if "delim=" in s:
 			delimiter = s.split('delim=^^')[1].split('^^')[0]
 		if "field=" in s: # field number
 			field = int(s.split('field=')[1].split()[0])
