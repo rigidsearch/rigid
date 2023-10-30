@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Rigid</title>
+	<img src={{url_for('static', filename='rigid.png')}} height=200>
+	<link rel=stylesheet href={{url_for('static', filename='style.css')}}>
+</head>
+<body>
+
+{% if role %}
+<p>Welcome! Your role: {{ role }}</p>
+{% endif %}
+
+
+<h2>Query Examples</h2>
+
+<p>Search all web logs:</p>
+
+<code>source=web</code>
+
+<p>Search all web logs containing keyword (must be quoted, search is always case insensitive):</p>
+
+<code>source=web keyword="192.168.1"</code>
+
+
+<p>Search all web logs containing multiple keywords:</p>
+
+<code>source=web keyword="192.168.1" AND source=web keyword="POST"</code>
+
+<br>
+
+<p>Search all IPs in web logs containing "192.168.1." that made POST requests, and are also in ssh logs: (using delimeter and field to extract IP, 0-indexed. Delimeter must be quoted in ^^ (like ^^"^^ to use double quote as delimeter))</p>
+
+<code>source=web keyword="192.168.1" delim=^^ ^^ field=0 AND source=web keyword="POST" delim=^^ ^^ field=2 AND source=ssh</code>
+
+
+<h2>Log Search</h2>	
+
+{% if sources %}
+
+	<b>Sources</b>
+	<ul>
+	{% for s in sources %}
+		<li>{{ s[0] }}</li>
+	{% endfor %}
+	</ul>
+{% endif %}
+
+
+<form id=form method=GET action=/api/search>
+<input name=q id=query >
+<button id=submit>submit</button>
+</form>
+
+<script>
+async function search() {
+  
+ 
+	  var response = await fetch(document.getElementById("form").action , {
+	    method: "POST", // *GET, POST, PUT, DELETE, etc.
+	    mode: "cors", // no-cors, *cors, same-origin
+	    cache: "no-cache", // *default, no-cache, reload, force-cache, only-if-cached
+	    credentials: "same-origin", // include, *same-origin, omit
+	    headers: {
+	      "Content-Type": "application/json",
+	      // 'Content-Type': 'application/x-www-form-urlencoded',
+	    },
+	    redirect: "follow", // manual, *follow, error
+	    referrerPolicy: "no-referrer", // no-referrer, *no-referrer-when-downgrade, origin, origin-when-cross-origin, same-origin, strict-origin, strict-origin-when-cross-origin, unsafe-url
+	    body: JSON.stringify({"q":document.getElementById("query").value}), // body data type must match "Content-Type" header
+	  });
+
+	  const result = await response.json();
+
+	  document.getElementById("results").innerText = JSON.stringify(result, null, 2);
+	  
+
+}
+
+async function doSearch(event) {
+	event.preventDefault();
+	await search();
+
+}
+
+
+const form = document.getElementById("form");
+form.addEventListener("submit", doSearch);
+
+</script>
+
+
+<pre id=results>
+</pre>
+
+
+</body>
+</html>
