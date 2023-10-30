@@ -1,6 +1,6 @@
 # Rigid
 
-<img src=rigid.png>
+<img src=static/rigid.png>
 
 Unscalable, uncomplex, inflexible, inelastic. Rigid.
 

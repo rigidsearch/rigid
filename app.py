@@ -5,11 +5,13 @@ from flask import Flask, request, render_template, session, jsonify, redirect, u
 import sqlite3
 import os
 import logging
-from hashlib import sha1
+from hashlib import sha1, md5
 import base64
 import random
+import json
 logger = logging.getLogger('waitress')
 logger.setLevel(logging.INFO)
+
 
 app = Flask(__name__)
 app.secret_key = sha1(open("/dev/urandom",'rb').read(30)).hexdigest()
@@ -48,7 +50,8 @@ cur.execute('CREATE TABLE logs (source TEXT, log TEXT, ts DATETIME DEFAULT CURRE
 cur.execute('CREATE TABLE ingest (source TEXT PRIMARY KEY, token TEXT, time_added DATETIME DEFAULT CURRENT_TIMESTAMP)')
 
 
-class Condition:
+class Condition():
+
 	def __init__(self, source, keyword, inverse=False, delimiter=" ", field=None):
 		self.source = source
 		self.keyword = keyword
@@ -86,6 +89,9 @@ class Condition:
 
 		return result, delimited
 
+	def to_dict(self):
+		return {"source": self.source, "keyword": self.keyword, "delimiter":self.delimiter, "field": self.field, "inverse":self.inverse}
+		
 
 
 
@@ -150,7 +156,7 @@ def add_source(source):
 	add source to db and return ingest secret token
 	'''
 	if session.get('role') == 'admin':
-		token = sha1(open("/dev/urandom", "rb").read(30)).hexdigest()
+		token = md5(open("/dev/urandom", "rb").read(30)).hexdigest()
 		cur = db.cursor()
 		cur.execute("INSERT OR IGNORE INTO ingest (source, token) values (?, ?)", (source, token))
 		db.commit()
@@ -167,7 +173,7 @@ def rotate_source_token(source):
 	add source to db and return ingest secret token
 	'''
 	if session.get('role') == 'admin':
-		token = sha1(open("/dev/urandom", "rb").read(30)).hexdigest()
+		token = md5(open("/dev/urandom", "rb").read(30)).hexdigest()
 		cur = db.cursor()
 		cur.execute("UPDATE ingest SET token = ? WHERE source = ?", (token, source))
 		db.commit()
@@ -204,8 +210,133 @@ def ingest(source, token):
 		
 	return jsonify({"status":"OK"})
 
+@app.route("/services/collector", methods=["POST"])
+def splunk_json_collector():
+	'''
+	splunk HEC compat.. lol
+	the auth header contains the ingest token. the source will be 
+	automagically selected from the token
+
+	if sent in UUID format, the dashes will be stripped out, and 
+	the result is the same length as a md5 hash of the token.
+	you can format your tokens by adding in dashes and uppercasing them
+	if splunk clients complain.
+
+	e.g. "Authorization: Splunk CF179AE4-3C99-45F5-A7CC-3284AA91CF67"
+	will use the ingest token cf179ae43c9945f5a7cc3284aa91cf67
+	'''
+	token = None
+	auth_header = request.headers.get("Authorization")
+
+	if auth_header:
+		if auth_header.startswith("Splunk "):
+			token = auth_header.split("Splunk ")[1]
+		elif auth_header.startswith("Basic "):
+			token = base64.b64decode(auth_header.split("Basic ")[1]).decode().split(':')[1]
+	else:
+		return "Unauthorized", 401
+
+	if '-' in token:
+		token = token.replace('-','').lower()
+
+
+	log = 'INGEST_ERROR'
+	try:
+		log = request.get_data().decode()
+	except UnicodeDecodeError:
+		log = str(request.get_data())
+	cur = db.cursor()
+	cur.execute("SELECT source FROM ingest WHERE token = ?", (token,))
+	r = cur.fetchone()
+	if r:
+		source = r[0]
+
+		# decode multiple json events like 
+		# {"event": "Pony 1 has left the barn"}{"event": "Pony 2 has left the barn"}{"event": "Pony 3 has left the barn", "nested": {"key1": "value1"}}
+		if log.startswith('{"'): # decode json
+			jsonl = '['+log+']' # should work even with just one event
+			for d in json.loads(jsonl):
+				# ingest them as separate events	
+				cur.execute("INSERT INTO logs (source, log) VALUES (?,?)", (source, json.dumps(d)))
+			db.commit()
+		else:
+			logger.info('splunk bad json log: ' + log)
+			# ingest it anyway
+			cur.execute("INSERT INTO logs (source, log) VALUES (?,?)", (source, log))
+			db.commit()
+
+		return "OK"
+	else:
+		return "Bad token", 401
+
+
 	
-	
+@app.route("/services/collector/<subpath>", methods=["POST"])
+def splunk_raw(subpath):
+	'''
+	splunk HEC compat.. lol
+	'''
+	token = None
+	auth_header = request.headers.get("Authorization")
+
+	if auth_header:
+		if auth_header.startswith("Splunk "):
+			token = auth_header.split("Splunk ")[1]
+		elif auth_header.startswith("Basic "):
+			token = base64.b64decode(auth_header.split("Basic ")[1]).decode().split(':')[1]
+	else:
+		return "Unauthorized", 401
+	log = 'INGEST_ERROR'
+	try:
+		log = request.get_data().decode()
+	except UnicodeDecodeError:
+		log = str(request.get_data())
+
+	if '-' in token:
+		token = token.replace('-','').lower()
+
+	cur = db.cursor()
+	cur.execute("SELECT source FROM ingest WHERE token = ?", (token,))
+	r = cur.fetchone()
+	if r:
+		source = r[0]
+		# logger.info("splunk source: "+source)
+
+		if subpath == "raw":
+
+			try:
+				log = request.get_data().decode()
+			except UnicodeDecodeError:
+				log = str(request.get_data())
+			
+			cur.execute("SELECT source FROM ingest WHERE token = ?", (token,))
+			r = cur.fetchone()
+			if r:
+				source = r[0]
+				for l in log.split("\n"): # line sep'd
+					cur.execute("INSERT INTO logs (source, log) VALUES (?,?)", (source, l))
+				db.commit()
+
+		if subpath == "event":
+			# explicit json fields
+
+			jsonl = '['+log+']' # should work even with just one event
+			try:
+				for d in json.loads(jsonl):
+					cur.execute("INSERT INTO logs (source, log) VALUES (?,?)", (source, json.dumps(d)))
+				db.commit()
+			except:
+				logger.warning("Could not load json" + jsonl)
+				cur.execute("INSERT INTO logs (source, log) VALUES (?,?)", (source, log))
+				db.commit()
+
+
+		cur.close()
+		return "OK"
+	else:
+		return "Bad token", 401
+
+
 
 @app.route("/api/search", methods=["GET","POST"])
 def search():
@@ -239,7 +370,7 @@ def search():
 
 			results_delim.extend(tmp_delim)
 
-		return jsonify(search_results)
+		return jsonify({"conditions": [c.to_dict() for c in conditions], "results":[search_results]})
 
 	else:
 		return jsonify({"error":"unauthorized"}), 403

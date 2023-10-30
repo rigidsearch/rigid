@@ -1,5 +1,7 @@
 FROM python:3.11-slim-bookworm
 
+# logs should always be in UTC
+ENV TZ="UTC"
 
 RUN useradd -m app
 COPY requirements.txt /app/

@@ -1,5 +1,5 @@
 
-COOKIE=$(curl -d 'username=admin&password=rigid' localhost:5000/login -v 2>&1  | grep Set-Cookie|cut -d : -f 2 |cut -d';' -f1)
+COOKIE=$(curl -d 'username=admin&password=supersecurepassw0rd' localhost:5000/login -v 2>&1  | grep Set-Cookie|cut -d : -f 2 |cut -d';' -f1)
 SSHTOKEN=$(curl -H "Cookie: $COOKIE" localhost:5000/api/ingest/add/ssh|jq -r .token)
 
 echo Token: $SSHTOKEN
@@ -19,3 +19,6 @@ curl -d "random log" localhost:5000/api/ingest/bla/$WEBTOKEN
 # correlation search between web and ssh based on delim space (delim=^^ ^^) and the 3rd field (index 0) (field=3)
 
 curl -H "Cookie: $COOKIE"  "http://localhost:5000/api/search?q=source%3Dssh+keyword%3D%22FAIL%22+delim%3D%5E%5E+%5E%5E+field%3D3+AND+source%3Dweb+"
+
+SPLUNKTOKEN=$(curl -H "Cookie: $COOKIE" localhost:5000/api/ingest/add/splunk |jq -r .token)
+echo "splunk token:" $SPLUNKTOKEN
